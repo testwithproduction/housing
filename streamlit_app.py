@@ -193,6 +193,8 @@ def create_price_per_sqft_yy_chart(filtered_df, zip_code):
         bargap=0.1,
     )
     fig_sqft_yy.update_xaxes(tickformat="%b %Y", tickmode="auto")
+    # Format y-axis to show percentages (multiply by 100 and add % symbol)
+    fig_sqft_yy.update_yaxes(tickformat=".0%")
     
     return fig_sqft_yy
 
@@ -408,11 +410,11 @@ if load_button:
                 # Load and filter CSV data using session state
                 filtered_df, total_rows_processed = load_and_filter_csv_with_session_state(csv_url, zip_code_str, rows_to_read_int)
 
-                st.write(
-                    f"🔍 Debug: Looking for zip code '{zip_code_str}' in postal_code column"
-                )
-                st.write(f"🔍 Debug: Processed {total_rows_processed:,} total rows")
-                st.write(f"🔍 Debug: Found {len(filtered_df)} matching records")
+                # st.write(
+                #     f"🔍 Debug: Looking for zip code '{zip_code_str}' in postal_code column"
+                # )
+                # st.write(f"🔍 Debug: Processed {total_rows_processed:,} total rows")
+                # st.write(f"🔍 Debug: Found {len(filtered_df)} matching records")
 
                 progress_bar.progress(1.0)
                 status_text.text("Data loaded successfully!")
@@ -446,13 +448,8 @@ if load_button:
                     "median_listing_price",
                     "median_days_on_market",
                     "median_listing_price_per_square_foot",
+                    "median_listing_price_per_square_foot_yy"
                 ]
-
-                # Add the new column if it exists
-                if "median_listing_price_per_square_foot_yy" in filtered_df.columns:
-                    display_columns.append(
-                        "median_listing_price_per_square_foot_yy"
-                    )
 
                 st.dataframe(filtered_df[display_columns])
 
@@ -460,12 +457,12 @@ if load_button:
                 display_all_charts(filtered_df, zip_code)
 
                 # Summary statistics
-                st.subheader("📊 Summary Statistics")
-                display_summary_metrics(filtered_df)
+                #st.subheader("📊 Summary Statistics")
+                #display_summary_metrics(filtered_df)
 
                 # Additional insights
-                st.subheader("🔍 Market Insights")
-                display_market_insights(filtered_df)
+                #st.subheader("🔍 Market Insights")
+                #display_market_insights(filtered_df)
 
 else:
     st.info("👈 Use the sidebar to enter a zip code and CSV URL, then load data")
