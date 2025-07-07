@@ -376,6 +376,79 @@ def create_price_per_sqft_yy_chart(filtered_df, zip_code):
     return fig_sqft_yy
 
 
+def create_median_square_feet_chart(filtered_df, zip_code):
+    """Create median square feet trend chart with yearly average lines and colored markers"""
+    # Calculate yearly averages first
+    filtered_df["year"] = filtered_df["date"].dt.year
+    yearly_averages = filtered_df.groupby("year")["median_square_feet"].mean()
+
+    # Create color mapping for markers based on yearly averages
+    def get_marker_color(row):
+        year = row["year"]
+        if year in yearly_averages:
+            return (
+                "red" if row["median_square_feet"] < yearly_averages[year] else "green"
+            )
+        return "blue"  # fallback color
+
+    filtered_df["marker_color"] = filtered_df.apply(get_marker_color, axis=1)
+
+    fig_sqft = px.line(
+        filtered_df,
+        x="date",
+        y="median_square_feet",
+        title=f"Median Square Feet Trend - Zip Code {zip_code}",
+        labels={
+            "median_square_feet": "Median Sq Ft",
+            "date": "Date",
+        },
+        markers=True,
+    )
+
+    # Add horizontal dotted lines for each year's average (spanning only that year)
+    for year, avg_sqft in yearly_averages.items():
+        year_data = filtered_df[filtered_df["year"] == year]
+        if not year_data.empty:
+            start_date = year_data["date"].min()
+            end_date = year_data["date"].max()
+            fig_sqft.add_shape(
+                type="line",
+                x0=start_date,
+                x1=end_date,
+                y0=avg_sqft,
+                y1=avg_sqft,
+                line=dict(dash="dot", color="gray", width=2),
+                opacity=0.7,
+            )
+            fig_sqft.add_annotation(
+                x=end_date,
+                y=avg_sqft,
+                text=f"{year} Avg: {avg_sqft:.0f} sq ft",
+                showarrow=False,
+                xanchor="left",
+                yanchor="bottom",
+                font=dict(size=10, color="gray"),
+                bgcolor="rgba(255,255,255,0.8)",
+                bordercolor="gray",
+                borderwidth=1,
+            )
+
+    fig_sqft.update_layout(
+        height=400,
+        showlegend=False,
+        xaxis_title="Date",
+        yaxis_title="Median Sq Ft",
+    )
+    fig_sqft.update_xaxes(tickformat="%b %Y", tickmode="auto")
+    fig_sqft.update_traces(line=dict(width=3), marker=dict(size=8))
+
+    # Update marker colors based on yearly averages
+    for i, trace in enumerate(fig_sqft.data):
+        trace.marker.color = filtered_df["marker_color"].tolist()
+
+    return fig_sqft
+
+
 def display_summary_metrics(filtered_df):
     """Display summary statistics in columns"""
     col1, col2, col3 = st.columns(3)
@@ -484,6 +557,10 @@ def display_all_charts(filtered_df, zip_code):
     st.markdown("### 📐 Median Price per Square Foot")
     fig_sqft = create_price_per_sqft_chart(filtered_df, zip_code)
     st.plotly_chart(fig_sqft, use_container_width=True)
+
+    st.markdown("### 🏠 Median Square Feet")
+    fig_sqft_median = create_median_square_feet_chart(filtered_df, zip_code)
+    st.plotly_chart(fig_sqft_median, use_container_width=True)
 
     st.markdown("### 📊 Median Price per Square Foot (YY)")
     fig_sqft_yy = create_price_per_sqft_yy_chart(filtered_df, zip_code)
