@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
 import requests
+from streamlit_tags import st_tags
 
 
 # Helper function to get file info (size and last modification time)
@@ -34,77 +35,59 @@ def get_file_info(url):
         return 0, 0
 
 
-# Session state CSV reader function
-def load_and_filter_csv_with_session_state(csv_url, zip_code_str, rows_to_read_int):
-    """Load and filter CSV data using session state for caching"""
-    # Get current file info
+# Helper: Efficiently load and filter CSV for only uncached zip codes in one pass
+def load_and_filter_csv_for_zipcodes_with_individual_cache(
+    csv_url, zip_codes, rows_to_read_int
+):
     current_file_size, current_mod_time = get_file_info(csv_url)
-
-    # Create a unique key based on file info and zip code (no URL)
-    cache_key = f"csv_data_{current_mod_time}_{current_file_size}_{zip_code_str}_{rows_to_read_int}"
-
-    # Check if we have cached data for this exact file state and zip code
-    if cache_key in st.session_state:
-        # Use cached data
-        st.info("📋 Using cached data (file unchanged)")
-        return (
-            st.session_state[cache_key]["filtered_df"],
-            st.session_state[cache_key]["total_rows_processed"],
-        )
-
-    # Load new data from URL
-    st.info("🔄 Loading fresh data from URL...")
-    filtered_chunks = []
-    total_rows_processed = 0
-    chunk_size = 10000  # Process 10,000 rows at a time
-
-    # Read CSV in chunks
-    chunk_iterator = pd.read_csv(csv_url, chunksize=chunk_size)
-
-    for chunk_num, chunk in enumerate(chunk_iterator):
-        # Check if we've reached the row limit
-        if rows_to_read_int != -1 and total_rows_processed >= rows_to_read_int:
-            break
-
-        # Limit chunk size if needed
-        if rows_to_read_int != -1:
-            remaining_rows = rows_to_read_int - total_rows_processed
-            if len(chunk) > remaining_rows:
-                chunk = chunk.head(remaining_rows)
-
-        total_rows_processed += len(chunk)
-
-        # Filter by zip code if postal_code column exists
-        if "postal_code" in chunk.columns:
-            # Convert CSV postal codes to strings and ensure they're 5 digits with leading zeros
-            chunk["postal_code_str"] = chunk["postal_code"].astype(str).str.zfill(5)
-
-            # Filter by exact string match
-            filtered_chunk = chunk[chunk["postal_code_str"] == zip_code_str].copy()
-
-            if not filtered_chunk.empty:
-                # Clean up temporary column
-                filtered_chunk = filtered_chunk.drop("postal_code_str", axis=1)
-                filtered_chunks.append(filtered_chunk)
-
-        # Memory cleanup
-        del chunk
-
-    # Combine all filtered chunks
-    if filtered_chunks:
-        filtered_df = pd.concat(filtered_chunks, ignore_index=True)
-        del filtered_chunks  # Clean up memory
-    else:
-        filtered_df = pd.DataFrame()
-
-    # Save to session state
-    st.session_state[cache_key] = {
-        "filtered_df": filtered_df,
-        "total_rows_processed": total_rows_processed,
+    # Prepare cache keys and determine which zip codes need to be loaded
+    cache_keys = {
+        z: f"csv_data_{current_mod_time}_{current_file_size}_{z}_{rows_to_read_int}"
+        for z in zip_codes
     }
-
-    st.success("✅ Data loaded and cached successfully!")
-    return filtered_df, total_rows_processed
+    uncached_zips = [z for z in zip_codes if cache_keys[z] not in st.session_state]
+    zip_dfs = {}
+    # Load from cache for already-cached zip codes
+    for z in zip_codes:
+        if cache_keys[z] in st.session_state:
+            zip_dfs[z] = st.session_state[cache_keys[z]]
+    if uncached_zips:
+        st.info(
+            f"🔄 Loading and filtering data for zip codes: {', '.join(uncached_zips)} ..."
+        )
+        filtered_chunks_dict = {z: [] for z in uncached_zips}
+        total_rows_processed = 0
+        chunk_size = 10000
+        chunk_iterator = pd.read_csv(csv_url, chunksize=chunk_size)
+        for chunk in chunk_iterator:
+            if rows_to_read_int != -1 and total_rows_processed >= rows_to_read_int:
+                break
+            if rows_to_read_int != -1:
+                remaining_rows = rows_to_read_int - total_rows_processed
+                if len(chunk) > remaining_rows:
+                    chunk = chunk.head(remaining_rows)
+            total_rows_processed += len(chunk)
+            if "postal_code" in chunk.columns:
+                chunk["postal_code_str"] = chunk["postal_code"].astype(str).str.zfill(5)
+                for z in uncached_zips:
+                    filtered_chunk = chunk[chunk["postal_code_str"] == z].copy()
+                    if not filtered_chunk.empty:
+                        filtered_chunk = filtered_chunk.drop("postal_code_str", axis=1)
+                        filtered_chunks_dict[z].append(filtered_chunk)
+            del chunk
+        # Build DataFrame for each uncached zip code and cache it
+        for z in uncached_zips:
+            if filtered_chunks_dict[z]:
+                zip_dfs[z] = pd.concat(filtered_chunks_dict[z], ignore_index=True)
+            else:
+                zip_dfs[z] = pd.DataFrame()
+            st.session_state[cache_keys[z]] = zip_dfs[z]
+        st.success(
+            f"✅ Data loaded and cached for zip codes: {', '.join(uncached_zips)}!"
+        )
+    else:
+        st.info("📋 All zip codes loaded from cache.")
+    return zip_dfs
 
 
 # Plotting functions
@@ -581,9 +564,16 @@ st.markdown("Enter a zip code to filter housing data and view trends")
 # Sidebar for input
 with st.sidebar:
     st.header("📊 Data Filter")
-    zip_code = st.text_input(
-        "Enter Zip Code:", value="11530", help="Enter a 5-digit zip code"
+    zip_codes = st_tags(
+        label="Enter zip codes:",
+        text="Press enter to add more",
+        value=["10001", "02638", "07078", "33578", "11530"],
+        suggestions=[],
+        maxtags=20,
+        key="zip_tags",
     )
+    # Clean and validate zip codes
+    zip_codes = [z.strip() for z in zip_codes if z.strip()]
 
     # URL input for CSV file
     csv_url = st.text_input(
@@ -603,22 +593,17 @@ with st.sidebar:
 
 # Main content area
 if load_button:
-    if not zip_code.isdigit() or len(zip_code) != 5:
-        st.error("Please enter a valid 5-digit zip code")
+    if not zip_codes or any((not z.isdigit() or len(z) != 5) for z in zip_codes):
+        st.error("Please enter valid 5-digit zip code(s)")
     else:
         with st.spinner(
             "Loading and processing data... Might need to wait a few minutes"
         ):
-            # Create progress indicators
             progress_bar = st.progress(0)
             status_text = st.empty()
-
-            # Check if URL is provided
             if not csv_url:
                 st.error("Please provide a CSV URL")
                 st.stop()
-
-            # Validate rows_to_read input
             try:
                 rows_to_read_int = int(rows_to_read)
                 if rows_to_read_int < -1:
@@ -627,87 +612,63 @@ if load_button:
             except ValueError:
                 st.error("Please enter a valid number for rows to read")
                 st.stop()
-
-            # Convert input zip code to string and ensure it's 5 digits with leading zeros
-            zip_code_str = str(zip_code).zfill(5)
-
-            # Initialize variables
-            filtered_df = pd.DataFrame()
-            total_rows_processed = 0
-
-            try:
-                # Load and filter CSV data using session state
-                filtered_df, total_rows_processed = (
-                    load_and_filter_csv_with_session_state(
-                        csv_url, zip_code_str, rows_to_read_int
-                    )
-                )
-
-                # st.write(
-                #     f"🔍 Debug: Looking for zip code '{zip_code_str}' in postal_code column"
-                # )
-                # st.write(f"🔍 Debug: Processed {total_rows_processed:,} total rows")
-                # st.write(f"🔍 Debug: Found {len(filtered_df)} matching records")
-
-                progress_bar.progress(1.0)
-                status_text.text("Data loaded successfully!")
-
-            except Exception as e:
-                st.error(f"Error reading CSV file: {str(e)}")
-                st.info("Please check your CSV URL and try again.")
-                st.stop()
-
-            # Clear progress indicators
+            # Efficiently load and filter the CSV for only uncached zip codes in one pass
+            zip_dfs = load_and_filter_csv_for_zipcodes_with_individual_cache(
+                csv_url, [str(z).zfill(5) for z in zip_codes], rows_to_read_int
+            )
+            for i, zip_code in enumerate(zip_codes):
+                progress_bar.progress((i + 1) / max(1, len(zip_codes)))
+            status_text.text("Preparing charts...")
+            # Create a tab for each zip code
+            tabs = st.tabs([f"Zip {z}" for z in zip_codes])
+            for i, zip_code in enumerate(zip_codes):
+                zip_code_str = str(zip_code).zfill(5)
+                with tabs[i]:
+                    filtered_df = zip_dfs[zip_code_str]
+                    if filtered_df.empty:
+                        st.warning(f"No data found for zip code {zip_code_str}")
+                    else:
+                        filtered_df["date"] = pd.to_datetime(
+                            filtered_df["month_date_yyyymm"], format="%Y%m"
+                        )
+                        filtered_df = filtered_df.sort_values("date")
+                        st.success(
+                            f"✅ Found {len(filtered_df)} records for zip code {zip_code_str}"
+                        )
+                        st.subheader("📋 Filtered Data")
+                        display_columns = [
+                            "month_date_yyyymm",
+                            "median_listing_price",
+                            "median_days_on_market",
+                            "median_listing_price_per_square_foot",
+                        ]
+                        if (
+                            "median_listing_price_per_square_foot_yy"
+                            in filtered_df.columns
+                        ):
+                            display_columns.append(
+                                "median_listing_price_per_square_foot_yy"
+                            )
+                        if "median_square_feet" in filtered_df.columns:
+                            display_columns.append("median_square_feet")
+                        st.dataframe(filtered_df[display_columns])
+                        display_all_charts(filtered_df, zip_code_str)
+            progress_bar.progress(1.0)
+            status_text.text("All charts ready!")
             progress_bar.empty()
             status_text.empty()
 
-            if filtered_df.empty:
-                st.warning(f"No data found for zip code {zip_code}")
-            else:
-                # Convert month_date_yyyymm to datetime for better plotting
-                filtered_df["date"] = pd.to_datetime(
-                    filtered_df["month_date_yyyymm"], format="%Y%m"
-                )
-                filtered_df = filtered_df.sort_values("date")
-
-                st.success(
-                    f"✅ Found {len(filtered_df)} records for zip code {zip_code} (from {total_rows_processed:,} total rows processed)"
-                )
-
-                # Display the filtered data
-                st.subheader("📋 Filtered Data")
-                display_columns = [
-                    "month_date_yyyymm",
-                    "median_listing_price",
-                    "median_days_on_market",
-                    "median_listing_price_per_square_foot",
-                    "median_listing_price_per_square_foot_yy",
-                ]
-
-                st.dataframe(filtered_df[display_columns])
-
-                # Display all charts
-                display_all_charts(filtered_df, zip_code)
-
-                # Summary statistics
-                # st.subheader("📊 Summary Statistics")
-                # display_summary_metrics(filtered_df)
-
-                # Additional insights
-                # st.subheader("🔍 Market Insights")
-                # display_market_insights(filtered_df)
-
 else:
-    st.info("👈 Use the sidebar to enter a zip code and CSV URL, then load data")
+    st.info("👈 Use the sidebar to enter zip code(s) and CSV URL, then load data")
 
     # Instructions
     st.markdown(
         """
     ### How to use this app:
 
-    1. **Enter Zip Code**: Type a 5-digit zip code in the sidebar (default: 11530)
+    1. **Enter Zip Codes**: Type 5-digit zip codes separated by commas in the sidebar (e.g., 11530,11531)
     2. **CSV URL**: Enter the URL of your CSV file (required)
-    3. **Number of Rows**: Enter -1 to read the entire file, or specify a number (e.g., 1000)
+    3. **Number of Rows**: Enter -1 to read the entire file, or specify a number (e.g., 1000 for first 1000 rows).
     4. **Load Data**: Click the "Load Data" button to fetch and filter the housing data
     5. **View Results**: The app will display:
        - Filtered data table
