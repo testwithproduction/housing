@@ -6,116 +6,127 @@ from plotly.subplots import make_subplots
 from datetime import datetime
 import requests
 
+
 # Helper function to get file info (size and last modification time)
 def get_file_info(url):
     """Get file size and last modification time from HTTP headers"""
     try:
         response = requests.head(url, timeout=10)
         response.raise_for_status()
-        
+
         # Get file size
-        content_length = response.headers.get('content-length')
+        content_length = response.headers.get("content-length")
         file_size = int(content_length) if content_length else 0
-        
+
         # Get last modification time
-        last_modified = response.headers.get('last-modified')
+        last_modified = response.headers.get("last-modified")
         if last_modified:
             # Parse the HTTP date format
             from email.utils import parsedate_to_datetime
+
             mod_time = parsedate_to_datetime(last_modified).timestamp()
         else:
             mod_time = 0
-            
+
         return file_size, mod_time
     except Exception as e:
         st.warning(f"Could not get file info: {e}")
         return 0, 0
+
 
 # Session state CSV reader function
 def load_and_filter_csv_with_session_state(csv_url, zip_code_str, rows_to_read_int):
     """Load and filter CSV data using session state for caching"""
     # Get current file info
     current_file_size, current_mod_time = get_file_info(csv_url)
-    
+
     # Create a unique key based on file info and zip code (no URL)
     cache_key = f"csv_data_{current_mod_time}_{current_file_size}_{zip_code_str}_{rows_to_read_int}"
-    
+
     # Check if we have cached data for this exact file state and zip code
     if cache_key in st.session_state:
         # Use cached data
         st.info("📋 Using cached data (file unchanged)")
-        return st.session_state[cache_key]["filtered_df"], st.session_state[cache_key]["total_rows_processed"]
-    
+        return (
+            st.session_state[cache_key]["filtered_df"],
+            st.session_state[cache_key]["total_rows_processed"],
+        )
+
     # Load new data from URL
     st.info("🔄 Loading fresh data from URL...")
     filtered_chunks = []
     total_rows_processed = 0
     chunk_size = 10000  # Process 10,000 rows at a time
-    
+
     # Read CSV in chunks
     chunk_iterator = pd.read_csv(csv_url, chunksize=chunk_size)
-    
+
     for chunk_num, chunk in enumerate(chunk_iterator):
         # Check if we've reached the row limit
         if rows_to_read_int != -1 and total_rows_processed >= rows_to_read_int:
             break
-            
+
         # Limit chunk size if needed
         if rows_to_read_int != -1:
             remaining_rows = rows_to_read_int - total_rows_processed
             if len(chunk) > remaining_rows:
                 chunk = chunk.head(remaining_rows)
-                
+
         total_rows_processed += len(chunk)
-        
+
         # Filter by zip code if postal_code column exists
         if "postal_code" in chunk.columns:
             # Convert CSV postal codes to strings and ensure they're 5 digits with leading zeros
             chunk["postal_code_str"] = chunk["postal_code"].astype(str).str.zfill(5)
-            
+
             # Filter by exact string match
             filtered_chunk = chunk[chunk["postal_code_str"] == zip_code_str].copy()
-            
+
             if not filtered_chunk.empty:
                 # Clean up temporary column
                 filtered_chunk = filtered_chunk.drop("postal_code_str", axis=1)
                 filtered_chunks.append(filtered_chunk)
-        
+
         # Memory cleanup
         del chunk
-    
+
     # Combine all filtered chunks
     if filtered_chunks:
         filtered_df = pd.concat(filtered_chunks, ignore_index=True)
         del filtered_chunks  # Clean up memory
     else:
         filtered_df = pd.DataFrame()
-    
+
     # Save to session state
     st.session_state[cache_key] = {
         "filtered_df": filtered_df,
-        "total_rows_processed": total_rows_processed
+        "total_rows_processed": total_rows_processed,
     }
-    
+
     st.success("✅ Data loaded and cached successfully!")
     return filtered_df, total_rows_processed
+
 
 # Plotting functions
 def create_price_trend_chart(filtered_df, zip_code):
     """Create median listing price trend chart with yearly average lines"""
     # Calculate yearly averages first
-    filtered_df['year'] = filtered_df['date'].dt.year
-    yearly_averages = filtered_df.groupby('year')['median_listing_price'].mean()
-    
+    filtered_df["year"] = filtered_df["date"].dt.year
+    yearly_averages = filtered_df.groupby("year")["median_listing_price"].mean()
+
     # Create color mapping for markers based on yearly averages
     def get_marker_color(row):
-        year = row['year']
+        year = row["year"]
         if year in yearly_averages:
-            return 'red' if row['median_listing_price'] < yearly_averages[year] else 'green'
-        return 'blue'  # fallback color
-    
-    filtered_df['marker_color'] = filtered_df.apply(get_marker_color, axis=1)
-    
+            return (
+                "red"
+                if row["median_listing_price"] < yearly_averages[year]
+                else "green"
+            )
+        return "blue"  # fallback color
+
+    filtered_df["marker_color"] = filtered_df.apply(get_marker_color, axis=1)
+
     fig_price = px.line(
         filtered_df,
         x="date",
@@ -124,15 +135,15 @@ def create_price_trend_chart(filtered_df, zip_code):
         labels={"median_listing_price": "Price ($)", "date": "Date"},
         markers=True,
     )
-    
+
     # Add horizontal dotted lines for each year's average (spanning only that year)
     for year, avg_price in yearly_averages.items():
         # Get the start and end dates for this year
-        year_data = filtered_df[filtered_df['year'] == year]
+        year_data = filtered_df[filtered_df["year"] == year]
         if not year_data.empty:
-            start_date = year_data['date'].min()
-            end_date = year_data['date'].max()
-            
+            start_date = year_data["date"].min()
+            end_date = year_data["date"].max()
+
             # Add horizontal line spanning only this year
             fig_price.add_shape(
                 type="line",
@@ -141,9 +152,9 @@ def create_price_trend_chart(filtered_df, zip_code):
                 y0=avg_price,
                 y1=avg_price,
                 line=dict(dash="dot", color="gray", width=2),
-                opacity=0.7
+                opacity=0.7,
             )
-            
+
             # Add annotation at the end of the line
             fig_price.add_annotation(
                 x=end_date,
@@ -155,9 +166,9 @@ def create_price_trend_chart(filtered_df, zip_code):
                 font=dict(size=10, color="gray"),
                 bgcolor="rgba(255,255,255,0.8)",
                 bordercolor="gray",
-                borderwidth=1
+                borderwidth=1,
             )
-    
+
     fig_price.update_layout(
         height=400,
         showlegend=False,
@@ -166,28 +177,33 @@ def create_price_trend_chart(filtered_df, zip_code):
     )
     fig_price.update_xaxes(tickformat="%b %Y", tickmode="auto")
     fig_price.update_traces(line=dict(width=3), marker=dict(size=8))
-    
+
     # Update marker colors based on yearly averages
     for i, trace in enumerate(fig_price.data):
-        trace.marker.color = filtered_df['marker_color'].tolist()
-    
+        trace.marker.color = filtered_df["marker_color"].tolist()
+
     return fig_price
+
 
 def create_days_on_market_chart(filtered_df, zip_code):
     """Create median days on market trend chart with yearly average lines"""
     # Calculate yearly averages first
-    filtered_df['year'] = filtered_df['date'].dt.year
-    yearly_averages = filtered_df.groupby('year')['median_days_on_market'].mean()
-    
+    filtered_df["year"] = filtered_df["date"].dt.year
+    yearly_averages = filtered_df.groupby("year")["median_days_on_market"].mean()
+
     # Create color mapping for markers based on yearly averages
     def get_marker_color(row):
-        year = row['year']
+        year = row["year"]
         if year in yearly_averages:
-            return 'red' if row['median_days_on_market'] < yearly_averages[year] else 'green'
-        return 'blue'  # fallback color
-    
-    filtered_df['marker_color'] = filtered_df.apply(get_marker_color, axis=1)
-    
+            return (
+                "red"
+                if row["median_days_on_market"] < yearly_averages[year]
+                else "green"
+            )
+        return "blue"  # fallback color
+
+    filtered_df["marker_color"] = filtered_df.apply(get_marker_color, axis=1)
+
     fig_days = px.line(
         filtered_df,
         x="date",
@@ -196,15 +212,15 @@ def create_days_on_market_chart(filtered_df, zip_code):
         labels={"median_days_on_market": "Days", "date": "Date"},
         markers=True,
     )
-    
+
     # Add horizontal dotted lines for each year's average (spanning only that year)
     for year, avg_days in yearly_averages.items():
         # Get the start and end dates for this year
-        year_data = filtered_df[filtered_df['year'] == year]
+        year_data = filtered_df[filtered_df["year"] == year]
         if not year_data.empty:
-            start_date = year_data['date'].min()
-            end_date = year_data['date'].max()
-            
+            start_date = year_data["date"].min()
+            end_date = year_data["date"].max()
+
             # Add horizontal line spanning only this year
             fig_days.add_shape(
                 type="line",
@@ -213,9 +229,9 @@ def create_days_on_market_chart(filtered_df, zip_code):
                 y0=avg_days,
                 y1=avg_days,
                 line=dict(dash="dot", color="gray", width=2),
-                opacity=0.7
+                opacity=0.7,
             )
-            
+
             # Add annotation at the end of the line
             fig_days.add_annotation(
                 x=end_date,
@@ -227,9 +243,9 @@ def create_days_on_market_chart(filtered_df, zip_code):
                 font=dict(size=10, color="gray"),
                 bgcolor="rgba(255,255,255,0.8)",
                 bordercolor="gray",
-                borderwidth=1
+                borderwidth=1,
             )
-    
+
     fig_days.update_layout(
         height=400,
         showlegend=False,
@@ -238,28 +254,35 @@ def create_days_on_market_chart(filtered_df, zip_code):
     )
     fig_days.update_xaxes(tickformat="%b %Y", tickmode="auto")
     fig_days.update_traces(line=dict(width=3), marker=dict(size=8))
-    
+
     # Update marker colors based on yearly averages
     for i, trace in enumerate(fig_days.data):
-        trace.marker.color = filtered_df['marker_color'].tolist()
-    
+        trace.marker.color = filtered_df["marker_color"].tolist()
+
     return fig_days
+
 
 def create_price_per_sqft_chart(filtered_df, zip_code):
     """Create median price per square foot trend chart with yearly average lines"""
     # Calculate yearly averages first
-    filtered_df['year'] = filtered_df['date'].dt.year
-    yearly_averages = filtered_df.groupby('year')['median_listing_price_per_square_foot'].mean()
-    
+    filtered_df["year"] = filtered_df["date"].dt.year
+    yearly_averages = filtered_df.groupby("year")[
+        "median_listing_price_per_square_foot"
+    ].mean()
+
     # Create color mapping for markers based on yearly averages
     def get_marker_color(row):
-        year = row['year']
+        year = row["year"]
         if year in yearly_averages:
-            return 'red' if row['median_listing_price_per_square_foot'] < yearly_averages[year] else 'green'
-        return 'blue'  # fallback color
-    
-    filtered_df['marker_color'] = filtered_df.apply(get_marker_color, axis=1)
-    
+            return (
+                "red"
+                if row["median_listing_price_per_square_foot"] < yearly_averages[year]
+                else "green"
+            )
+        return "blue"  # fallback color
+
+    filtered_df["marker_color"] = filtered_df.apply(get_marker_color, axis=1)
+
     fig_sqft = px.line(
         filtered_df,
         x="date",
@@ -271,15 +294,15 @@ def create_price_per_sqft_chart(filtered_df, zip_code):
         },
         markers=True,
     )
-    
+
     # Add horizontal dotted lines for each year's average (spanning only that year)
     for year, avg_price in yearly_averages.items():
         # Get the start and end dates for this year
-        year_data = filtered_df[filtered_df['year'] == year]
+        year_data = filtered_df[filtered_df["year"] == year]
         if not year_data.empty:
-            start_date = year_data['date'].min()
-            end_date = year_data['date'].max()
-            
+            start_date = year_data["date"].min()
+            end_date = year_data["date"].max()
+
             # Add horizontal line spanning only this year
             fig_sqft.add_shape(
                 type="line",
@@ -288,9 +311,9 @@ def create_price_per_sqft_chart(filtered_df, zip_code):
                 y0=avg_price,
                 y1=avg_price,
                 line=dict(dash="dot", color="gray", width=2),
-                opacity=0.7
+                opacity=0.7,
             )
-            
+
             # Add annotation at the end of the line
             fig_sqft.add_annotation(
                 x=end_date,
@@ -302,9 +325,9 @@ def create_price_per_sqft_chart(filtered_df, zip_code):
                 font=dict(size=10, color="gray"),
                 bgcolor="rgba(255,255,255,0.8)",
                 bordercolor="gray",
-                borderwidth=1
+                borderwidth=1,
             )
-    
+
     fig_sqft.update_layout(
         height=400,
         showlegend=False,
@@ -313,12 +336,13 @@ def create_price_per_sqft_chart(filtered_df, zip_code):
     )
     fig_sqft.update_xaxes(tickformat="%b %Y", tickmode="auto")
     fig_sqft.update_traces(line=dict(width=3), marker=dict(size=8))
-    
+
     # Update marker colors based on yearly averages
     for i, trace in enumerate(fig_sqft.data):
-        trace.marker.color = filtered_df['marker_color'].tolist()
-    
+        trace.marker.color = filtered_df["marker_color"].tolist()
+
     return fig_sqft
+
 
 def create_price_per_sqft_yy_chart(filtered_df, zip_code):
     """Create median price per square foot (YY) bar chart with color coding"""
@@ -348,8 +372,9 @@ def create_price_per_sqft_yy_chart(filtered_df, zip_code):
     fig_sqft_yy.update_xaxes(tickformat="%b %Y", tickmode="auto")
     # Format y-axis to show percentages (multiply by 100 and add % symbol)
     fig_sqft_yy.update_yaxes(tickformat=".0%")
-    
+
     return fig_sqft_yy
+
 
 def display_summary_metrics(filtered_df):
     """Display summary statistics in columns"""
@@ -365,11 +390,7 @@ def display_summary_metrics(filtered_df):
         st.metric(
             "Avg Listing Price",
             f"${avg_price:,.0f}",
-            (
-                f"{price_change*100:.1f}%"
-                if len(filtered_df) > 1
-                else "N/A"
-            ),
+            (f"{price_change*100:.1f}%" if len(filtered_df) > 1 else "N/A"),
         )
 
     with col2:
@@ -382,32 +403,20 @@ def display_summary_metrics(filtered_df):
         st.metric(
             "Avg Days on Market",
             f"{avg_days:.0f} days",
-            (
-                f"{days_change*100:.1f}%"
-                if len(filtered_df) > 1
-                else "N/A"
-            ),
+            (f"{days_change*100:.1f}%" if len(filtered_df) > 1 else "N/A"),
         )
 
     with col3:
-        avg_price_sqft = filtered_df[
-            "median_listing_price_per_square_foot"
-        ].mean()
+        avg_price_sqft = filtered_df["median_listing_price_per_square_foot"].mean()
         sqft_change = (
-            filtered_df["median_listing_price_per_square_foot"]
-            .pct_change()
-            .iloc[-1]
+            filtered_df["median_listing_price_per_square_foot"].pct_change().iloc[-1]
             if len(filtered_df) > 1
             else 0
         )
         st.metric(
             "Avg Price per Sq Ft",
             f"${avg_price_sqft:.0f}",
-            (
-                f"{sqft_change*100:.1f}%"
-                if len(filtered_df) > 1
-                else "N/A"
-            ),
+            (f"{sqft_change*100:.1f}%" if len(filtered_df) > 1 else "N/A"),
         )
 
     # Add fourth column for YY metric if it exists
@@ -427,12 +436,9 @@ def display_summary_metrics(filtered_df):
             st.metric(
                 "Avg Price per Sq Ft (YY)",
                 f"{avg_price_sqft_yy:.1f}%",
-                (
-                    f"{sqft_yy_change*100:.1f}%"
-                    if len(filtered_df) > 1
-                    else "N/A"
-                ),
+                (f"{sqft_yy_change*100:.1f}%" if len(filtered_df) > 1 else "N/A"),
             )
+
 
 def display_market_insights(filtered_df):
     """Display market insights and analysis"""
@@ -443,9 +449,7 @@ def display_market_insights(filtered_df):
         if len(filtered_df) > 1:
             latest_price = filtered_df["median_listing_price"].iloc[-1]
             earliest_price = filtered_df["median_listing_price"].iloc[0]
-            total_change = (
-                (latest_price - earliest_price) / earliest_price
-            ) * 100
+            total_change = ((latest_price - earliest_price) / earliest_price) * 100
             st.write(f"Total price change: {total_change:+.1f}%")
 
             if total_change > 0:
@@ -458,9 +462,7 @@ def display_market_insights(filtered_df):
         if len(filtered_df) > 1:
             latest_days = filtered_df["median_days_on_market"].iloc[-1]
             earliest_days = filtered_df["median_days_on_market"].iloc[0]
-            days_change = (
-                (latest_days - earliest_days) / earliest_days
-            ) * 100
+            days_change = ((latest_days - earliest_days) / earliest_days) * 100
             st.write(f"Days on market change: {days_change:+.1f}%")
 
             if latest_days < 30:
@@ -470,30 +472,27 @@ def display_market_insights(filtered_df):
             else:
                 st.write("🐌 **Slow-moving market**")
 
+
 def display_all_charts(filtered_df, zip_code):
     """Display all charts for the housing data"""
     st.subheader("📈 Housing Trends")
 
-    # Chart 1: Median Listing Price
     st.markdown("### 💰 Median Listing Price")
     fig_price = create_price_trend_chart(filtered_df, zip_code)
     st.plotly_chart(fig_price, use_container_width=True)
 
-    # Chart 2: Median Days on Market
-    st.markdown("### ⏱️ Median Days on Market")
-    fig_days = create_days_on_market_chart(filtered_df, zip_code)
-    st.plotly_chart(fig_days, use_container_width=True)
-
-    # Chart 3: Median Price per Square Foot
     st.markdown("### 📐 Median Price per Square Foot")
     fig_sqft = create_price_per_sqft_chart(filtered_df, zip_code)
     st.plotly_chart(fig_sqft, use_container_width=True)
 
-    # Chart 4: Median Price per Square Foot (YY version) - if column exists
-    if "median_listing_price_per_square_foot_yy" in filtered_df.columns:
-        st.markdown("### 📊 Median Price per Square Foot (YY)")
-        fig_sqft_yy = create_price_per_sqft_yy_chart(filtered_df, zip_code)
-        st.plotly_chart(fig_sqft_yy, use_container_width=True)
+    st.markdown("### 📊 Median Price per Square Foot (YY)")
+    fig_sqft_yy = create_price_per_sqft_yy_chart(filtered_df, zip_code)
+    st.plotly_chart(fig_sqft_yy, use_container_width=True)
+
+    st.markdown("### ⏱️ Median Days on Market")
+    fig_days = create_days_on_market_chart(filtered_df, zip_code)
+    st.plotly_chart(fig_days, use_container_width=True)
+
 
 # Page configuration
 st.set_page_config(page_title="Housing Data Dashboard", page_icon="🏠", layout="wide")
@@ -561,7 +560,11 @@ if load_button:
 
             try:
                 # Load and filter CSV data using session state
-                filtered_df, total_rows_processed = load_and_filter_csv_with_session_state(csv_url, zip_code_str, rows_to_read_int)
+                filtered_df, total_rows_processed = (
+                    load_and_filter_csv_with_session_state(
+                        csv_url, zip_code_str, rows_to_read_int
+                    )
+                )
 
                 # st.write(
                 #     f"🔍 Debug: Looking for zip code '{zip_code_str}' in postal_code column"
@@ -601,7 +604,7 @@ if load_button:
                     "median_listing_price",
                     "median_days_on_market",
                     "median_listing_price_per_square_foot",
-                    "median_listing_price_per_square_foot_yy"
+                    "median_listing_price_per_square_foot_yy",
                 ]
 
                 st.dataframe(filtered_df[display_columns])
@@ -610,12 +613,12 @@ if load_button:
                 display_all_charts(filtered_df, zip_code)
 
                 # Summary statistics
-                #st.subheader("📊 Summary Statistics")
-                #display_summary_metrics(filtered_df)
+                # st.subheader("📊 Summary Statistics")
+                # display_summary_metrics(filtered_df)
 
                 # Additional insights
-                #st.subheader("🔍 Market Insights")
-                #display_market_insights(filtered_df)
+                # st.subheader("🔍 Market Insights")
+                # display_market_insights(filtered_df)
 
 else:
     st.info("👈 Use the sidebar to enter a zip code and CSV URL, then load data")
