@@ -102,7 +102,20 @@ def load_and_filter_csv_with_session_state(csv_url, zip_code_str, rows_to_read_i
 
 # Plotting functions
 def create_price_trend_chart(filtered_df, zip_code):
-    """Create median listing price trend chart"""
+    """Create median listing price trend chart with yearly average lines"""
+    # Calculate yearly averages first
+    filtered_df['year'] = filtered_df['date'].dt.year
+    yearly_averages = filtered_df.groupby('year')['median_listing_price'].mean()
+    
+    # Create color mapping for markers based on yearly averages
+    def get_marker_color(row):
+        year = row['year']
+        if year in yearly_averages:
+            return 'red' if row['median_listing_price'] < yearly_averages[year] else 'green'
+        return 'blue'  # fallback color
+    
+    filtered_df['marker_color'] = filtered_df.apply(get_marker_color, axis=1)
+    
     fig_price = px.line(
         filtered_df,
         x="date",
@@ -111,6 +124,40 @@ def create_price_trend_chart(filtered_df, zip_code):
         labels={"median_listing_price": "Price ($)", "date": "Date"},
         markers=True,
     )
+    
+    # Add horizontal dotted lines for each year's average (spanning only that year)
+    for year, avg_price in yearly_averages.items():
+        # Get the start and end dates for this year
+        year_data = filtered_df[filtered_df['year'] == year]
+        if not year_data.empty:
+            start_date = year_data['date'].min()
+            end_date = year_data['date'].max()
+            
+            # Add horizontal line spanning only this year
+            fig_price.add_shape(
+                type="line",
+                x0=start_date,
+                x1=end_date,
+                y0=avg_price,
+                y1=avg_price,
+                line=dict(dash="dot", color="gray", width=2),
+                opacity=0.7
+            )
+            
+            # Add annotation at the end of the line
+            fig_price.add_annotation(
+                x=end_date,
+                y=avg_price,
+                text=f"{year} Avg: ${avg_price:,.0f}",
+                showarrow=False,
+                xanchor="left",
+                yanchor="bottom",
+                font=dict(size=10, color="gray"),
+                bgcolor="rgba(255,255,255,0.8)",
+                bordercolor="gray",
+                borderwidth=1
+            )
+    
     fig_price.update_layout(
         height=400,
         showlegend=False,
@@ -120,10 +167,27 @@ def create_price_trend_chart(filtered_df, zip_code):
     fig_price.update_xaxes(tickformat="%b %Y", tickmode="auto")
     fig_price.update_traces(line=dict(width=3), marker=dict(size=8))
     
+    # Update marker colors based on yearly averages
+    for i, trace in enumerate(fig_price.data):
+        trace.marker.color = filtered_df['marker_color'].tolist()
+    
     return fig_price
 
 def create_days_on_market_chart(filtered_df, zip_code):
-    """Create median days on market trend chart"""
+    """Create median days on market trend chart with yearly average lines"""
+    # Calculate yearly averages first
+    filtered_df['year'] = filtered_df['date'].dt.year
+    yearly_averages = filtered_df.groupby('year')['median_days_on_market'].mean()
+    
+    # Create color mapping for markers based on yearly averages
+    def get_marker_color(row):
+        year = row['year']
+        if year in yearly_averages:
+            return 'red' if row['median_days_on_market'] < yearly_averages[year] else 'green'
+        return 'blue'  # fallback color
+    
+    filtered_df['marker_color'] = filtered_df.apply(get_marker_color, axis=1)
+    
     fig_days = px.line(
         filtered_df,
         x="date",
@@ -132,6 +196,40 @@ def create_days_on_market_chart(filtered_df, zip_code):
         labels={"median_days_on_market": "Days", "date": "Date"},
         markers=True,
     )
+    
+    # Add horizontal dotted lines for each year's average (spanning only that year)
+    for year, avg_days in yearly_averages.items():
+        # Get the start and end dates for this year
+        year_data = filtered_df[filtered_df['year'] == year]
+        if not year_data.empty:
+            start_date = year_data['date'].min()
+            end_date = year_data['date'].max()
+            
+            # Add horizontal line spanning only this year
+            fig_days.add_shape(
+                type="line",
+                x0=start_date,
+                x1=end_date,
+                y0=avg_days,
+                y1=avg_days,
+                line=dict(dash="dot", color="gray", width=2),
+                opacity=0.7
+            )
+            
+            # Add annotation at the end of the line
+            fig_days.add_annotation(
+                x=end_date,
+                y=avg_days,
+                text=f"{year} Avg: {avg_days:.0f} days",
+                showarrow=False,
+                xanchor="left",
+                yanchor="bottom",
+                font=dict(size=10, color="gray"),
+                bgcolor="rgba(255,255,255,0.8)",
+                bordercolor="gray",
+                borderwidth=1
+            )
+    
     fig_days.update_layout(
         height=400,
         showlegend=False,
@@ -141,10 +239,27 @@ def create_days_on_market_chart(filtered_df, zip_code):
     fig_days.update_xaxes(tickformat="%b %Y", tickmode="auto")
     fig_days.update_traces(line=dict(width=3), marker=dict(size=8))
     
+    # Update marker colors based on yearly averages
+    for i, trace in enumerate(fig_days.data):
+        trace.marker.color = filtered_df['marker_color'].tolist()
+    
     return fig_days
 
 def create_price_per_sqft_chart(filtered_df, zip_code):
-    """Create median price per square foot trend chart"""
+    """Create median price per square foot trend chart with yearly average lines"""
+    # Calculate yearly averages first
+    filtered_df['year'] = filtered_df['date'].dt.year
+    yearly_averages = filtered_df.groupby('year')['median_listing_price_per_square_foot'].mean()
+    
+    # Create color mapping for markers based on yearly averages
+    def get_marker_color(row):
+        year = row['year']
+        if year in yearly_averages:
+            return 'red' if row['median_listing_price_per_square_foot'] < yearly_averages[year] else 'green'
+        return 'blue'  # fallback color
+    
+    filtered_df['marker_color'] = filtered_df.apply(get_marker_color, axis=1)
+    
     fig_sqft = px.line(
         filtered_df,
         x="date",
@@ -156,6 +271,40 @@ def create_price_per_sqft_chart(filtered_df, zip_code):
         },
         markers=True,
     )
+    
+    # Add horizontal dotted lines for each year's average (spanning only that year)
+    for year, avg_price in yearly_averages.items():
+        # Get the start and end dates for this year
+        year_data = filtered_df[filtered_df['year'] == year]
+        if not year_data.empty:
+            start_date = year_data['date'].min()
+            end_date = year_data['date'].max()
+            
+            # Add horizontal line spanning only this year
+            fig_sqft.add_shape(
+                type="line",
+                x0=start_date,
+                x1=end_date,
+                y0=avg_price,
+                y1=avg_price,
+                line=dict(dash="dot", color="gray", width=2),
+                opacity=0.7
+            )
+            
+            # Add annotation at the end of the line
+            fig_sqft.add_annotation(
+                x=end_date,
+                y=avg_price,
+                text=f"{year} Avg: ${avg_price:.0f}",
+                showarrow=False,
+                xanchor="left",
+                yanchor="bottom",
+                font=dict(size=10, color="gray"),
+                bgcolor="rgba(255,255,255,0.8)",
+                bordercolor="gray",
+                borderwidth=1
+            )
+    
     fig_sqft.update_layout(
         height=400,
         showlegend=False,
@@ -164,6 +313,10 @@ def create_price_per_sqft_chart(filtered_df, zip_code):
     )
     fig_sqft.update_xaxes(tickformat="%b %Y", tickmode="auto")
     fig_sqft.update_traces(line=dict(width=3), marker=dict(size=8))
+    
+    # Update marker colors based on yearly averages
+    for i, trace in enumerate(fig_sqft.data):
+        trace.marker.color = filtered_df['marker_color'].tolist()
     
     return fig_sqft
 
