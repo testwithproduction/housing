@@ -5,10 +5,4 @@ description = "A Streamlit app for visualizing housing data from large CSV files
 authors = [
     { name = "Your Name", email = "your@email.com" }
 ]
-requires-python = ">=3.8"
-dependencies = [
-    "streamlit>=1.28.0",
-    "pandas>=2.0.0",
-    "plotly>=5.15.0",
-    "requests>=2.31.0"
-] 
+requires-python = ">=3.8" 
