@@ -64,40 +64,64 @@ if load_button:
                     st.error("Please enter a valid number for rows to read")
                     st.stop()
                 
-                # Read CSV file using pandas
-                status_text.text("Loading CSV file...")
+                                # Read CSV file in chunks for memory efficiency
+                status_text.text("Loading CSV file in chunks...")
                 try:
-                    if rows_to_read_int == -1:
-                        # Read entire file
-                        df = pd.read_csv(csv_url)
-                        status_text.text(f"Loaded entire file ({len(df):,} rows)")
-                    else:
-                        # Read specified number of rows
-                        df = pd.read_csv(csv_url, nrows=rows_to_read_int)
-                        status_text.text(f"Loaded {len(df):,} rows from file")
+                    # Initialize variables
+                    filtered_chunks = []
+                    total_rows_processed = 0
+                    chunk_size = 10000  # Process 10,000 rows at a time
                     
-                    progress_bar.progress(0.5)
-                    status_text.text("Filtering data by zip code...")
-                                        
-                    # Filter by zip code - handle leading zeros properly
-                    if 'postal_code' in df.columns:
-                        # Convert input zip code to string and ensure it's 5 digits with leading zeros
-                        zip_code_str = str(zip_code).zfill(5)
+                    # Convert input zip code to string and ensure it's 5 digits with leading zeros
+                    zip_code_str = str(zip_code).zfill(5)
+                    
+                    # Read CSV in chunks
+                    chunk_iterator = pd.read_csv(csv_url, chunksize=chunk_size)
+                    
+                    for chunk_num, chunk in enumerate(chunk_iterator):
+                        # Update progress
+                        progress = min(0.8, (chunk_num * chunk_size) / max(rows_to_read_int, 100000))
+                        progress_bar.progress(progress)
+                        status_text.text(f"Processing chunk {chunk_num + 1} ({len(chunk):,} rows)...")
                         
-                        # Convert CSV postal codes to strings and ensure they're 5 digits with leading zeros
-                        df['postal_code_str'] = df['postal_code'].astype(str).str.zfill(5)
+                        # Check if we've reached the row limit
+                        if rows_to_read_int != -1 and total_rows_processed >= rows_to_read_int:
+                            break
                         
-                        # Filter by exact string match
-                        filtered_df = df[df['postal_code_str'] == zip_code_str].copy()
+                        # Limit chunk size if needed
+                        if rows_to_read_int != -1:
+                            remaining_rows = rows_to_read_int - total_rows_processed
+                            if len(chunk) > remaining_rows:
+                                chunk = chunk.head(remaining_rows)
                         
-                        st.write(f"🔍 Debug: Looking for zip code '{zip_code_str}' in postal_code column")
-                        st.write(f"🔍 Debug: Found {len(filtered_df)} matching records")
+                        total_rows_processed += len(chunk)
                         
-                        # Clean up temporary column
-                        if not filtered_df.empty:
-                            filtered_df = filtered_df.drop('postal_code_str', axis=1)
+                        # Filter by zip code if postal_code column exists
+                        if 'postal_code' in chunk.columns:
+                            # Convert CSV postal codes to strings and ensure they're 5 digits with leading zeros
+                            chunk['postal_code_str'] = chunk['postal_code'].astype(str).str.zfill(5)
+                            
+                            # Filter by exact string match
+                            filtered_chunk = chunk[chunk['postal_code_str'] == zip_code_str].copy()
+                            
+                            if not filtered_chunk.empty:
+                                # Clean up temporary column
+                                filtered_chunk = filtered_chunk.drop('postal_code_str', axis=1)
+                                filtered_chunks.append(filtered_chunk)
+                        
+                        # Memory cleanup
+                        del chunk
+                    
+                    # Combine all filtered chunks
+                    if filtered_chunks:
+                        filtered_df = pd.concat(filtered_chunks, ignore_index=True)
+                        del filtered_chunks  # Clean up memory
                     else:
-                        filtered_df = pd.DataFrame()  # Empty DataFrame if no postal code column
+                        filtered_df = pd.DataFrame()
+                    
+                    st.write(f"🔍 Debug: Looking for zip code '{zip_code_str}' in postal_code column")
+                    st.write(f"🔍 Debug: Processed {total_rows_processed:,} total rows")
+                    st.write(f"🔍 Debug: Found {len(filtered_df)} matching records")
                     
                     progress_bar.progress(1.0)
                     status_text.text("Data loaded successfully!")
@@ -118,7 +142,7 @@ if load_button:
                     filtered_df['date'] = pd.to_datetime(filtered_df['month_date_yyyymm'], format='%Y%m')
                     filtered_df = filtered_df.sort_values('date')
                     
-                    st.success(f"✅ Found {len(filtered_df)} records for zip code {zip_code} (from {len(df):,} total rows loaded)")
+                    st.success(f"✅ Found {len(filtered_df)} records for zip code {zip_code} (from {total_rows_processed:,} total rows processed)")
                     
                     # Display the filtered data
                     st.subheader("📋 Filtered Data")
