@@ -1,0 +1,110 @@
+{
+  "name": "housing-dashboard",
+  "version": "1.0.0",
+  "description": "Housing Data Dashboard - Desktop Application",
+  "main": "electron/main.js",
+  "scripts": {
+    "electron": "electron .",
+    "electron-dev": "electron . --dev",
+    "build": "electron-builder",
+    "build-win": "electron-builder --win",
+    "build-mac": "electron-builder --mac",
+    "build-linux": "electron-builder --linux",
+    "dist": "npm run build",
+    "pack": "electron-builder --dir",
+    "postinstall": "electron-builder install-app-deps",
+    "audit": "npm audit",
+    "audit-fix": "npm audit fix",
+    "security-check": "npm audit --audit-level moderate",
+    "clean": "rm -rf node_modules package-lock.json && npm install"
+  },
+  "keywords": [
+    "housing",
+    "dashboard",
+    "streamlit",
+    "electron",
+    "desktop"
+  ],
+  "author": "Housing Dashboard",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.0.2",
+    "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "electron-is-dev": "^2.0.0",
+    "find-free-port": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "build": {
+    "appId": "com.housing.dashboard",
+    "productName": "Housing Dashboard",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**/*",
+      "streamlit_app.py",
+      "requirements.txt",
+      "CLAUDE.md",
+      "README.md"
+    ],
+    "extraFiles": [
+      {
+        "from": "python-dist",
+        "to": "python-dist",
+        "filter": ["**/*"]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.finance",
+      "icon": "electron/assets/icon.icns",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        }
+      ]
+    },
+    "win": {
+      "icon": "electron/assets/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "linux": {
+      "icon": "electron/assets/icon.png",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/housing-dashboard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/housing-dashboard/issues"
+  },
+  "homepage": "https://github.com/yourusername/housing-dashboard#readme",
+  "private": true,
+  "funding": {
+    "type": "individual",
+    "url": "https://github.com/sponsors/yourusername"
+  }
+}
